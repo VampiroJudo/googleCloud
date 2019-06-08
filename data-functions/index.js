@@ -6,15 +6,30 @@ const datastore = Datastore();
 const storage = Storage();
 const vision = new vision.ImageAnnotatorClient();
 
-exports.imageTagger = (event, callback) => {
+exports.imageTagger = (event) => {
+	return tagger(event);
+}
+
+exports.deleteTagger = (event) => {
+	return tagger(event);
+}
+
+tagger = (event) => {
 	const object = event.data;
 	console.log(object);
 
+	if(event.context.eventType === 'google.storage.object.delete') {
+		object.resourceState = 'not_exists';
+	} else { any 
+		object.resourceState = 'exists';
+	}
+
 	if(!object.contentType.startsWith('image/')) {
 		console.log('This is not an image');
-		callback();
-		return;
+		return Promise.resolve();
 	}
+
+	return processLabels(object);
 }	
 
 function processLabels(bucketObject) {
@@ -26,13 +41,34 @@ function processLabels(bucketObject) {
 		const objectExists = data[0].length > 0;
 		const key = objectExists ? data[0][0][datastore.KEY] : datastore.key['Images'];
 
-		if(objectExists && bucketObject.resource == 'not_exists') {
+		if(objectExists && bucketObject.resourceState === 'not_exists') {
 			return datastore.delete(key).then(() => {
 				console.log('Successfully deleted entity.');
 			});
+		} else {
+			return client.labelDetection(storagePath).then(results => {
+				console.log(results);
+
+				const labels = results[0].labelAnnotations;
+				const descriptions = label.filter((label) => label.score >= 0.65)
+					.map((label) => label.description);
+
+				const entity = {
+					key: key,
+					data: {
+						storagePath: storagePath,
+						tags: descriptions
+					}
+				};
+
+				return datastore.save(entity);
+			})
+			.catch(err => {
+				console.error('Vision api returned failure', err);
+			})
 		}
 	})
 	.catch(err => {
-		console.log('Query run received an error', err);
+		console.error('Query run received an error', err);
 	})
 }
